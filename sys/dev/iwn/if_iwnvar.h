@@ -273,6 +273,7 @@ struct iwn_softc {
 	int			calib_cnt;
 	struct iwn_calib_state	calib;
 	struct callout		watchdog_to;
+	struct callout		ct_kill_exit_to;
 
 	struct iwn_fw_info	fw;
 	struct iwn_calib_info	calibcmd[5];
@@ -281,7 +282,10 @@ struct iwn_softc {
 	struct iwn_rx_stat	last_rx_stat;
 	int			last_rx_valid;
 	struct iwn_ucode_info	ucode_info;
+	struct iwn_rxon         rx_on[IWN_NUM_RXON_CTX];
 	struct iwn_rxon		rxon;
+	int                     ctx;
+        struct ieee80211vap     *ivap[IWN_NUM_RXON_CTX];
 	uint32_t		rawtemp;
 	int			temp;
 	int			noise;
@@ -329,6 +333,12 @@ struct iwn_softc {
 	struct iwn_tx_radiotap_header sc_txtap;
 };
 
+enum iwn_rxon_ctx_id {
+        IWL_RXON_BSS_CTX,
+        IWL_RXON_PAN_CTX,
+        IWL_NUM_RXON_CTX
+};
+
 #define IWN_LOCK_INIT(_sc) \
 	mtx_init(&(_sc)->sc_mtx, device_get_nameunit((_sc)->sc_dev), \
 	    MTX_NETWORK_LOCK, MTX_DEF)
@@ -336,3 +346,21 @@ struct iwn_softc {
 #define IWN_LOCK_ASSERT(_sc)		mtx_assert(&(_sc)->sc_mtx, MA_OWNED)
 #define IWN_UNLOCK(_sc)			mtx_unlock(&(_sc)->sc_mtx)
 #define IWN_LOCK_DESTROY(_sc)		mtx_destroy(&(_sc)->sc_mtx)
+
+#define IWN_POWERSAVE_LVL_NONE                  0
+#define IWN_POWERSAVE_LVL_VOIP_COMPATIBLE       1
+#define IWN_POWERSAVE_LVL_MAX                   5
+
+/*
+ * By default we enable power saving. An alternative is to by default use best
+ * speed/latency mode (no power saving), which would be in line with the
+ * previous driver implementation. The default level can be changed easily from
+ * the line below.
+ *
+ * Note that once the interface wlan0 etc. is created, the user/system can
+ * change the mode using ifconfig/ioctl.  
+ */
+#define IWN_POWERSAVE_LVL_DEFAULT       IWN_POWERSAVE_LVL_VOIP_COMPATIBLE
+
+/* DTIM value to pass in for IWN_POWERSAVE_LVL_VOIP_COMPATIBLE */
+#define IWN_POWERSAVE_DTIM_VOIP_COMPATIBLE 2
