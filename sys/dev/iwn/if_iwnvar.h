@@ -475,3 +475,12 @@ struct iwn_softc {
 
 /* DTIM value to pass in for IWN_POWERSAVE_LVL_VOIP_COMPATIBLE */
 #define IWN_POWERSAVE_DTIM_VOIP_COMPATIBLE 2
+
+const uint8_t iwn_bss_ac_to_queue[] = {
+        2, 3, 1, 0,
+};
+
+const uint8_t iwn_pan_ac_to_queue[] = {
+        5, 4, 6, 7,
+};
+

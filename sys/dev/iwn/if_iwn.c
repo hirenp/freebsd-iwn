@@ -328,6 +328,8 @@ static void	iwn_scan_curchan(struct ieee80211_scan_state *, unsigned long);
 static void	iwn_scan_mindwell(struct ieee80211_scan_state *);
 static void	iwn_hw_reset(void *, int);
 static int 	iwn_set_pan_params(struct iwn_softc *);
+uint16_t 	iwn_get_active_dwell(struct iwn_softc *, struct ieee80211_channel *);
+uint16_t 	iwn_get_passive_dwell(struct iwn_softc *, struct ieee80211_channel *);
 
 #define IWN_DEBUG
 #ifdef IWN_DEBUG
@@ -3649,6 +3651,7 @@ iwn_tx_data(struct iwn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	bus_dma_segment_t *seg, segs[IWN_MAX_SCATTER];
 	uint8_t tid, ridx, txant, type;
 	int ac, i, totlen, error, pad, nsegs = 0, rate;
+	struct iwn_vap *ivp = IWN_VAP(vap);
 
 	IWN_LOCK_ASSERT(sc);
 
@@ -3664,21 +3667,23 @@ iwn_tx_data(struct iwn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 		qos = 0;
 		tid = 0;
 	}
-	ac = M_WME_GETAC(m);
-	if (m->m_flags & M_AMPDU_MPDU) {
-		struct ieee80211_tx_ampdu *tap = &ni->ni_tx_ampdu[ac];
 
-		if (!IEEE80211_AMPDU_RUNNING(tap)) {
-			m_freem(m);
-			return EINVAL;
-		}
+        if(ivp->ctx == IWN_RXON_PAN_CTX)
+                ac = iwn_pan_ac_to_queue[M_WME_GETAC(m)];
+        else
+                ac = iwn_bss_ac_to_queue[M_WME_GETAC(m)];
 
-		ac = *(int *)tap->txa_private;
-		*(uint16_t *)wh->i_seq =
-		    htole16(ni->ni_txseqs[tid] << IEEE80211_SEQ_SEQ_SHIFT);
-		ni->ni_txseqs[tid]++;
-	}
-	ring = &sc->txq[ac];
+        if (IEEE80211_QOS_HAS_SEQ(wh) &&
+            IEEE80211_AMPDU_RUNNING(&ni->ni_tx_ampdu[ac])) {
+                struct ieee80211_tx_ampdu *tap = &ni->ni_tx_ampdu[ac];
+
+                ring = &sc->txq[*(int *)tap->txa_private];
+                *(uint16_t *)wh->i_seq =
+                    htole16(ni->ni_txseqs[tid] << IEEE80211_SEQ_SEQ_SHIFT);
+                ni->ni_txseqs[tid]++;
+        } else
+                ring = &sc->txq[ac];
+
 	desc = &ring->desc[ring->cur];
 	data = &ring->data[ring->cur];
 
@@ -3690,11 +3695,9 @@ iwn_tx_data(struct iwn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 		rate = tp->mcastrate;
 	else if (tp->ucastrate != IEEE80211_FIXED_RATE_NONE)
 		rate = tp->ucastrate;
-	else {
-		/* XXX pass pktlen */
-		(void) ieee80211_ratectl_rate(ni, NULL, 0);
+	else
 		rate = ni->ni_txrate;
-	}
+
 	ridx = ic->ic_rt->rateCodeToIndex[rate];
 
 	/* Encrypt the frame if need be. */
@@ -3770,10 +3773,14 @@ iwn_tx_data(struct iwn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	}
 
 	if (IEEE80211_IS_MULTICAST(wh->i_addr1) ||
-	    type != IEEE80211_FC0_TYPE_DATA)
-		tx->id = sc->broadcast_id;
-	else
-		tx->id = wn->id;
+	    type != IEEE80211_FC0_TYPE_DATA) {
+                if(ivp->ctx == IWN_RXON_PAN_CTX)
+                        tx->id = IWN_PAN_BCAST_ID;
+                else
+                        tx->id = IWN_BROADCAST_ID;
+        }
+        else
+                tx->id = wn->id;
 
 	if (type == IEEE80211_FC0_TYPE_MGT) {
 		uint8_t subtype = wh->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK;
@@ -3917,6 +3924,7 @@ iwn_tx_data_raw(struct iwn_softc *sc, struct mbuf *m,
 	u_int hdrlen;
 	int ac, totlen, error, pad, nsegs = 0, i, rate;
 	uint8_t ridx, type, txant;
+        struct iwn_vap *ivp = IWN_VAP(vap);
 
 	IWN_LOCK_ASSERT(sc);
 
@@ -4004,7 +4012,10 @@ iwn_tx_data_raw(struct iwn_softc *sc, struct mbuf *m,
 
 	tx->len = htole16(totlen);
 	tx->tid = 0;
-	tx->id = sc->broadcast_id;
+        if(ivp->ctx == IWN_RXON_PAN_CTX)
+                tx->id = IWN_PAN_BCAST_ID;
+        else
+                tx->id = IWN_BROADCAST_ID;
 	tx->rts_ntries = params->ibp_try1;
 	tx->data_ntries = params->ibp_try0;
 	tx->lifetime = htole32(IWN_LIFETIME_INFINITE);
@@ -4260,16 +4271,29 @@ iwn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 static int
 iwn_cmd(struct iwn_softc *sc, int code, const void *buf, int size, int async)
 {
-	struct iwn_tx_ring *ring = &sc->txq[4];
+	struct iwn_tx_ring *ring;
 	struct iwn_tx_desc *desc;
 	struct iwn_tx_data *data;
 	struct iwn_tx_cmd *cmd;
 	struct mbuf *m;
 	bus_addr_t paddr;
 	int totlen, error;
+        int cmd_queue_num;
+
+        if((sc->uc_scan_progress == 1) && (code != IWN_CMD_SCAN)) {
+                //printf("\nScanning in progress..not sending cmd %x.", code);
+                return 0;
+        }
 
 	if (async == 0)
 		IWN_LOCK_ASSERT(sc);
+
+        if(sc->uc_pan_support == IWN_UC_PAN_PRESENT)
+                cmd_queue_num = IWN_PAN_CMD_QUEUE;
+        else
+                cmd_queue_num = IWN_CMD_QUEUE_NUM;
+
+        ring = &sc->txq[cmd_queue_num];
 
 	desc = &ring->desc[ring->cur];
 	data = &ring->data[ring->cur];
@@ -5727,12 +5751,24 @@ ieee80211_add_ssid(uint8_t *frm, const uint8_t *ssid, u_int len)
 	return frm + len;
 }
 
+/*
+ * Callback from net80211 to handle the minimum dwell time being met.
+ * The intent is to terminate the scan but we just let the firmware
+ * notify us when it's finished as we have no safe way to abort it.
+ */
+void
+iwn_scan_mindwell(struct ieee80211_scan_state *ss)
+{
+        /* Nothing as of now. */
+        /* NB: don't try to abort scan; wait for firmware to finish */
+}
+
 static int
 iwn_scan(struct iwn_softc *sc)
 {
 	struct ifnet *ifp = sc->sc_ifp;
 	struct ieee80211com *ic = ifp->if_l2com;
-	struct ieee80211_scan_state *ss = ic->ic_scan;	/*XXX*/
+	struct ieee80211_scan_state *ss = ic->ic_scan;
 	struct ieee80211_node *ni = ss->ss_vap->iv_bss;
 	struct iwn_scan_hdr *hdr;
 	struct iwn_cmd_data *tx;
@@ -5745,6 +5781,16 @@ iwn_scan(struct iwn_softc *sc)
 	uint16_t rxchain;
 	uint8_t txant;
 	int buflen, error;
+        uint8_t new_scan_threshold;
+        struct iwn_eeprom_chan *channel;
+
+        struct ieee80211vap *vap = ni->ni_vap;
+        struct iwn_vap *ivp = IWN_VAP(vap);
+
+        if(ivp->ctx == IWN_RXON_BSS_CTX)
+                sc->rxon = &sc->rx_on[IWN_RXON_BSS_CTX];
+        else if(ivp->ctx == IWN_RXON_PAN_CTX)
+                sc->rxon = &sc->rx_on[IWN_RXON_PAN_CTX];
 
 	buf = malloc(IWN_SCAN_MAXSZ, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (buf == NULL) {
@@ -5777,7 +5823,10 @@ iwn_scan(struct iwn_softc *sc)
 
 	tx = (struct iwn_cmd_data *)(hdr + 1);
 	tx->flags = htole32(IWN_TX_AUTO_SEQ);
-	tx->id = sc->broadcast_id;
+        if(ivp->ctx == IWN_RXON_PAN_CTX)
+                tx->id = IWN_PAN_BCAST_ID;
+        else
+                tx->id = IWN_BROADCAST_ID;
 	tx->lifetime = htole32(IWN_LIFETIME_INFINITE);
 
 	if (IEEE80211_IS_CHAN_5GHZ(ic->ic_curchan)) {
@@ -5814,7 +5863,8 @@ iwn_scan(struct iwn_softc *sc)
 	    IEEE80211_FC0_SUBTYPE_PROBE_REQ;
 	wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
 	IEEE80211_ADDR_COPY(wh->i_addr1, ifp->if_broadcastaddr);
-	IEEE80211_ADDR_COPY(wh->i_addr2, IF_LLADDR(ifp));
+        IEEE80211_ADDR_COPY(wh->i_addr2, ivp->macaddr);
+
 	IEEE80211_ADDR_COPY(wh->i_addr3, ifp->if_broadcastaddr);
 	*(uint16_t *)&wh->i_dur[0] = 0;	/* filled by HW */
 	*(uint16_t *)&wh->i_seq[0] = 0;	/* filled by HW */
@@ -5834,54 +5884,85 @@ iwn_scan(struct iwn_softc *sc)
 	chan = (struct iwn_scan_chan *)frm;
 	chan->chan = htole16(ieee80211_chan2ieee(ic, c));
 	chan->flags = 0;
+
 	if (ss->ss_nssid > 0)
 		chan->flags |= htole32(IWN_CHAN_NPBREQS(1));
+
+        /*
+         * If active scanning is requested but a certain channel is
+         * marked passive, we can do active scanning if we detect
+         * transmissions.
+         *
+         * There is an issue with some firmware versions that triggers
+         * a sysassert on a "good CRC threshold" of zero (== disabled),
+         * on a radar channel even though this means that we should NOT
+         * send probes.
+         *
+         * The "good CRC threshold" is the number of frames that we
+         * need to receive during our dwell time on a channel before
+         * sending out probes -- setting this to a huge value will
+         * mean we never reach it, but at the same time work around
+         * the aforementioned issue. Thus use IWN_SCAN_CRC_TH_NEVER
+         * here instead of IWN_SCAN_CRC_TH_DISABLED.
+         *
+         * This was fixed in later versions along with some other
+         * scan changes, and the threshold behaves as a flag in those
+         * versions.
+         */
+
+        channel = iwn_find_eeprom_channel(sc, c);
+        if (channel == NULL) {
+                if_printf(ic->ic_ifp,
+                    "%s: invalid channel %u freq %u/0x%x\n",
+                    __func__, c->ic_ieee, c->ic_freq, c->ic_flags);
+                return EINVAL;
+        }
+
+        new_scan_threshold = ((sc->tlv_feature_flags &
+            (1<<IWN_FW_TLV_FLAGS_NEW_SCAN_BITPOS)) >> IWN_FW_TLV_FLAGS_NEW_SCAN_BITPOS);
+
+        /* Selection criteria for Active/Passive scanning */
+        if ((ss->ss_nssid == 0) || ((channel->flags & IWN_EEPROM_CHAN_ACTIVE) == 0) ||
+            (c->ic_flags & IEEE80211_CHAN_PASSIVE)) {
+                chan->flags |= htole32(IWN_CHAN_PASSIVE);
+                if (new_scan_threshold == 1)
+                        hdr->crc_threshold = IWN_SCAN_CRC_TH_DISABLED;
+                else
+                        hdr->crc_threshold = IWN_SCAN_CRC_TH_NEVER;
+        } else {
+                chan->flags |= htole32(IWN_CHAN_ACTIVE);
+                hdr->crc_threshold = IWN_SCAN_CRC_TH_DEFAULT;
+        }
+
 	chan->dsp_gain = 0x6e;
-	if (IEEE80211_IS_CHAN_5GHZ(c) &&
-	    !(c->ic_flags & IEEE80211_CHAN_PASSIVE)) {
+	if (IEEE80211_IS_CHAN_5GHZ(c))
 		chan->rf_gain = 0x3b;
-		chan->active  = htole16(24);
-		chan->passive = htole16(110);
-		chan->flags |= htole32(IWN_CHAN_ACTIVE);
-	} else if (IEEE80211_IS_CHAN_5GHZ(c)) {
-		chan->rf_gain = 0x3b;
-		chan->active  = htole16(24);
-		if (sc->rxon->associd)
-			chan->passive = htole16(78);
-		else
-			chan->passive = htole16(110);
-		hdr->crc_threshold = 0xffff;
-	} else if (!(c->ic_flags & IEEE80211_CHAN_PASSIVE)) {
-		chan->rf_gain = 0x28;
-		chan->active  = htole16(36);
-		chan->passive = htole16(120);
-		chan->flags |= htole32(IWN_CHAN_ACTIVE);
-	} else {
-		chan->rf_gain = 0x28;
-		chan->active  = htole16(36);
-		if (sc->rxon->associd)
-			chan->passive = htole16(88);
-		else
-			chan->passive = htole16(120);
-		hdr->crc_threshold = 0xffff;
-	}
+        else
+                chan->rf_gain = 0x28;
 
-	DPRINTF(sc, IWN_DEBUG_STATE,
-	    "%s: chan %u flags 0x%x rf_gain 0x%x "
-	    "dsp_gain 0x%x active 0x%x passive 0x%x\n", __func__,
-	    chan->chan, chan->flags, chan->rf_gain, chan->dsp_gain,
-	    chan->active, chan->passive);
+        chan->active  = htole16(iwn_get_active_dwell(sc, c));
+        chan->passive = htole16(iwn_get_passive_dwell(sc, c));
 
-	hdr->nchan++;
-	chan++;
-	buflen = (uint8_t *)chan - buf;
-	hdr->len = htole16(buflen);
+        DPRINTF(sc, IWN_DEBUG_STATE,
+            "%s: chan %u flags 0x%x rf_gain 0x%x "
+            "dsp_gain 0x%x active 0x%x passive 0x%x\n", __func__,
+            chan->chan, chan->flags, chan->rf_gain, chan->dsp_gain,
+            chan->active, chan->passive);
 
-	DPRINTF(sc, IWN_DEBUG_STATE, "sending scan command nchan=%d\n",
-	    hdr->nchan);
-	error = iwn_cmd(sc, IWN_CMD_SCAN, buf, buflen, 1);
-	free(buf, M_DEVBUF);
-	return error;
+        hdr->nchan++;
+        chan++;
+        buflen = (uint8_t *)chan - buf;
+        hdr->len = htole16(buflen);
+
+        DPRINTF(sc, IWN_DEBUG_STATE, "sending scan command nchan=%d\n",
+            hdr->nchan);
+
+        sc->sc_scan_timer = IWN_SCAN_CHAN_TIMEOUT;
+        error = iwn_cmd(sc, IWN_CMD_SCAN, buf, buflen, 0);
+
+        free(buf, M_DEVBUF);
+
+        return error;
 }
 
 static int
@@ -7757,10 +7838,22 @@ iwn_scan_start(struct ieee80211com *ic)
 {
 	struct ifnet *ifp = ic->ic_ifp;
 	struct iwn_softc *sc = ifp->if_softc;
+        struct ieee80211_scan_state *ss = ic->ic_scan;
+        struct ieee80211vap *vap = ss->ss_vap;
 
 	IWN_LOCK(sc);
+
+        sc->uc_scan_progress = 1;
+        if(sc->ctx == IWN_RXON_PAN_CTX)
+                iwn_set_pan_params(sc);
+
 	/* make the link LED blink while we're scanning */
-	iwn_set_led(sc, IWN_LED_LINK, 20, 2, IWN_LED_INT_BLINK);
+        if (vap->iv_state  != IEEE80211_S_RUN) {
+                if(sc->sc_led.led_cur_mode != IWN_LED_SLOW_BLINK) {
+                        sc->sc_led.led_cur_mode = IWN_LED_SLOW_BLINK;
+                        iwn_set_led(sc, IWN_LED_LINK, 190, 10,IWN_LED_SLOW_BLINK);
+                }
+        }
 	IWN_UNLOCK(sc);
 }
 
@@ -7772,14 +7865,42 @@ iwn_scan_end(struct ieee80211com *ic)
 {
 	struct ifnet *ifp = ic->ic_ifp;
 	struct iwn_softc *sc = ifp->if_softc;
-	struct ieee80211vap *vap = TAILQ_FIRST(&ic->ic_vaps);
+	struct ieee80211_scan_state *ss = ic->ic_scan;
+        struct ieee80211vap *vap = ss->ss_vap;
 
 	IWN_LOCK(sc);
+        sc->uc_scan_progress = 0;
+        sc->sc_scan_timer = 0;
+        if(sc->ctx == IWN_RXON_PAN_CTX)
+                iwn_set_pan_params(sc);
+
+        /* Link LED always on while associated. */
 	if (vap->iv_state == IEEE80211_S_RUN) {
 		/* Set link LED to ON status if we are associated */
 		iwn_set_led(sc, IWN_LED_LINK, 0, 1, IWN_LED_STATIC_ON);
 	}
 	IWN_UNLOCK(sc);
+}
+
+/*
+ * Callback from net80211 to start scanning of the current channel.
+ */
+void
+iwn_scan_curchan(struct ieee80211_scan_state *ss, unsigned long maxdwell)
+{
+        struct ieee80211vap *vap = ss->ss_vap;
+        struct iwn_softc *sc = vap->iv_ic->ic_ifp->if_softc;
+        int error;
+
+        IWN_LOCK(sc);
+        sc->sc_scan_timer = 0;
+        error = iwn_scan(sc);
+        IWN_UNLOCK(sc);
+        if (error != 0) {
+                sc->uc_scan_progress = 0;
+                sc->sc_scan_timer = 0;
+                ieee80211_cancel_scan(vap);
+        }
 }
 
 /*
@@ -7811,32 +7932,47 @@ iwn_set_channel(struct ieee80211com *ic)
 	 */
 }
 
-/*
- * Callback from net80211 to start scanning of the current channel.
- */
-static void
-iwn_scan_curchan(struct ieee80211_scan_state *ss, unsigned long maxdwell)
+uint16_t
+iwn_get_active_dwell(struct iwn_softc *sc, struct ieee80211_channel *c)
 {
-	struct ieee80211vap *vap = ss->ss_vap;
-	struct iwn_softc *sc = vap->iv_ic->ic_ifp->if_softc;
-	int error;
+        int n_probes = 1;
 
-	IWN_LOCK(sc);
-	error = iwn_scan(sc);
-	IWN_UNLOCK(sc);
-	if (error != 0)
-		ieee80211_cancel_scan(vap);
+        if (IEEE80211_IS_CHAN_5GHZ(c))
+                return IWN_ACTIVE_DWELL_TIME_52 +
+                        IWN_ACTIVE_DWELL_FACTOR_52 * (n_probes + 1);
+        else
+                return IWN_ACTIVE_DWELL_TIME_24 +
+                        IWN_ACTIVE_DWELL_FACTOR_24 * (n_probes + 1);
 }
 
-/*
- * Callback from net80211 to handle the minimum dwell time being met.
- * The intent is to terminate the scan but we just let the firmware
- * notify us when it's finished as we have no safe way to abort it.
- */
-static void
-iwn_scan_mindwell(struct ieee80211_scan_state *ss)
+uint16_t
+iwn_get_passive_dwell(struct iwn_softc *sc, struct ieee80211_channel *c)
 {
-	/* NB: don't try to abort scan; wait for firmware to finish */
+        uint8_t ctx_id = 0;
+        uint16_t beacon_int;
+        struct ieee80211vap *vap;
+        struct iwn_vap *ivp;
+        uint16_t dwell_time;
+
+        dwell_time = (IEEE80211_IS_CHAN_2GHZ(c)) ?
+                            IWN_PASSIVE_DWELL_BASE + IWN_PASSIVE_DWELL_TIME_24 :
+                            IWN_PASSIVE_DWELL_BASE + IWN_PASSIVE_DWELL_TIME_52;
+
+        for (ctx_id = 0; ctx_id < IWN_NUM_RXON_CTX; ctx_id++) {
+                vap = sc->ivap[ctx_id];
+                ivp = IWN_VAP(vap);
+                sc->rxon = &sc->rx_on[ctx_id];
+                if (!sc->rxon->associd)
+                        continue;
+                beacon_int = ivp->beacon_int;
+                if (!beacon_int)
+                        beacon_int = IWN_PASSIVE_DWELL_BASE;
+                beacon_int = (beacon_int * 98) / 100 - IWN_CHANNEL_TUNE_TIME * 2;
+                dwell_time = min(beacon_int, dwell_time);
+                if(sc->ctx != IWN_RXON_PAN_CTX) break;
+        }
+
+        return dwell_time;
 }
 
 static void

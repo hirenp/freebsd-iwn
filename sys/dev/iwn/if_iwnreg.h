@@ -800,6 +800,25 @@ struct iwn_pmgt_cmd {
 	uint32_t	beacons;
 } __packed;
 
+#define IWN_SCAN_CRC_TH_DISABLED        0
+#define IWN_SCAN_CRC_TH_DEFAULT         htole16(1)
+#define IWN_SCAN_CRC_TH_NEVER           htole16(0xffff)
+
+/* Maximum size of a scan command. */
+#define IWN_SCAN_MAXSZ                  (MCLBYTES - 4)
+
+#define IWN_ACTIVE_DWELL_TIME_24        (30)    /* all times in msec */
+#define IWN_ACTIVE_DWELL_TIME_52        (20)
+#define IWN_ACTIVE_DWELL_FACTOR_24      (3)
+#define IWN_ACTIVE_DWELL_FACTOR_52      (2)
+
+#define IWN_PASSIVE_DWELL_TIME_24       (20)    /* all times in msec */
+#define IWN_PASSIVE_DWELL_TIME_52       (10)
+#define IWN_PASSIVE_DWELL_BASE          (100)
+#define IWN_CHANNEL_TUNE_TIME           (5)
+
+#define IWN_SCAN_CHAN_TIMEOUT           2
+
 /* Structures for command IWN_CMD_SCAN. */
 struct iwn_scan_essid {
 	uint8_t	id;
@@ -826,9 +845,29 @@ struct iwn_scan_hdr {
 	/* Followed by an array of ``nchan'' structs iwn_scan_chan. */
 } __packed;
 
+/* Structure for IWN_START_SCAN notification. */
+struct iwn_start_scan {
+        uint64_t        tstamp;
+        uint32_t        tbeacon;
+        uint8_t         chan;
+        uint8_t         band;
+        uint16_t        reserved;
+        uint32_t        status;
+} __packed;
+
+/* Structure for IWN_STOP_SCAN notification. */
+struct iwn_stop_scan {
+        uint8_t         nchan;
+        uint8_t         status;
+        uint8_t         reserved;
+        uint8_t         chan;
+        uint64_t        tsf;
+} __packed;
+
 struct iwn_scan_chan {
 	uint32_t	flags;
 #define IWN_CHAN_ACTIVE		(1 << 0)
+#define IWN_CHAN_PASSIVE        (0 << 0)
 #define IWN_CHAN_NPBREQS(x)	(((1 << (x)) - 1) << 1)
 
 	uint16_t	chan;
@@ -1187,25 +1226,6 @@ struct iwn_compressed_ba {
 	uint16_t	ssn;
 } __packed;
 
-/* Structure for IWN_START_SCAN notification. */
-struct iwn_start_scan {
-	uint64_t	tstamp;
-	uint32_t	tbeacon;
-	uint8_t		chan;
-	uint8_t		band;
-	uint16_t	reserved;
-	uint32_t	status;
-} __packed;
-
-/* Structure for IWN_STOP_SCAN notification. */
-struct iwn_stop_scan {
-	uint8_t		nchan;
-	uint8_t		status;
-	uint8_t		reserved;
-	uint8_t		chan;
-	uint64_t	tsf;
-} __packed;
-
 /* Structure for IWN_SPECTRUM_MEASUREMENT notification. */
 struct iwn_spectrum_notif {
 	uint8_t		id;
@@ -1399,6 +1419,8 @@ struct iwn_fw_tlv {
 	uint16_t	alt;
 	uint32_t	len;
 } __packed;
+
+#define IWN_FW_TLV_FLAGS_NEW_SCAN_BITPOS 1
 
 #define IWN4965_FW_TEXT_MAXSZ	( 96 * 1024)
 #define IWN4965_FW_DATA_MAXSZ	( 40 * 1024)
