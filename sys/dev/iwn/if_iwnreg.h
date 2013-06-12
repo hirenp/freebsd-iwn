@@ -30,6 +30,9 @@
 #define IWN4965_FIRSTAGGQUEUE	7
 #define IWN5000_FIRSTAGGQUEUE	10
 
+#define IWN_CMD_QUEUE_NUM      	4
+#define IWN_PAN_CMD_QUEUE      	9
+
 #define IWN4965_NDMACHNLS	7
 #define IWN5000_NDMACHNLS	8
 
@@ -70,6 +73,8 @@
 #define IWN_OTP_GP		0x034
 #define IWN_GIO			0x03c
 #define IWN_GP_DRIVER		0x050
+#define IWN_UCODE_GP1           0x054
+#define IWN_UCODE_GP1_SET       0x058
 #define IWN_UCODE_GP1_CLR	0x05c
 #define IWN_LED			0x094
 #define IWN_DRAM_INT_TBL	0x0a0
@@ -79,10 +84,13 @@
 #define IWN_HW_REV_WA		0x22c
 #define IWN_DBG_HPET_MEM	0x240
 #define IWN_DBG_LINK_PWR_MGMT	0x250
+
+/* HBUS CSR Register Space */
 #define IWN_MEM_RADDR		0x40c
 #define IWN_MEM_WADDR		0x410
 #define IWN_MEM_WDATA		0x418
 #define IWN_MEM_RDATA		0x41c
+#define IWN_TARG_MBX_C          0x430
 #define IWN_PRPH_WADDR  	0x444
 #define IWN_PRPH_RADDR   	0x448
 #define IWN_PRPH_WDATA  	0x44c
@@ -439,6 +447,16 @@ struct iwn_tx_cmd {
 #define IWN_CMD_PHY_CALIB		176
 #define IWN_CMD_BT_COEX_PRIOTABLE	204
 #define IWN_CMD_BT_COEX_PROT		205
+/* PAN commands */
+#define IWN_CMD_WIPAN_PARAMS                    0xb2
+#define IWN_CMD_WIPAN_RXON                      0xb3
+#define IWN_CMD_WIPAN_RXON_TIMING               0xb4
+#define IWN_CMD_WIPAN_RXON_ASSOC                0xb6
+#define IWN_CMD_WIPAN_QOS_PARAM                 0xb7
+#define IWN_CMD_WIPAN_WEPKEY                    0xb8
+#define IWN_CMD_WIPAN_P2P_CHANNEL_SWITCH        0xb9
+#define IWN_CMD_WIPAN_NOA_NOTIFICATION          0xbc
+#define IWN_CMD_WIPAN_DEACTIVATION_COMPLETE     0xbd
 
 	uint8_t	flags;
 	uint8_t	idx;
@@ -468,6 +486,8 @@ struct iwn_rxon {
 #define IWN_MODE_STA		3
 #define IWN_MODE_IBSS		4
 #define IWN_MODE_MONITOR	6
+#define IWN_MODE_2STA           8
+#define IWN_MODE_P2P            9
 
 	uint8_t		air;
 	uint16_t	rxchain;
@@ -551,6 +571,7 @@ struct iwn_cmd_timing {
 	uint16_t	atim;
 	uint32_t	binitval;
 	uint16_t	lintval;
+	uint8_t         dtim_period;
 	uint16_t	reserved;
 } __packed;
 
@@ -564,7 +585,11 @@ struct iwn_node_info {
 	uint8_t		macaddr[IEEE80211_ADDR_LEN];
 	uint16_t	reserved2;
 	uint8_t		id;
-#define IWN_ID_BSS		 0
+#define IWN_ID_BSS		0
+#define IWN_STA_ID            	1
+
+#define IWN_PAN_BCAST_ID       	14
+#define IWN_BROADCAST_ID       	15
 #define IWN5000_ID_BROADCAST	15
 #define IWN4965_ID_BROADCAST	31
 
@@ -1347,7 +1372,7 @@ struct iwn_fw_dump {
 struct iwn_fw_tlv_hdr {
 	uint32_t	zero;	/* Always 0, to differentiate from legacy. */
 	uint32_t	signature;
-#define IWN_FW_SIGNATURE	0x0a4c5749	/* "IWL\n" */
+#define IWN_FW_SIGNATURE	0x0a4c5749	/* "IWN\n" */
 
 	uint8_t		descr[64];
 	uint32_t	rev;
@@ -1366,8 +1391,10 @@ struct iwn_fw_tlv {
 #define IWN_FW_TLV_INIT_DATA		4
 #define IWN_FW_TLV_BOOT_TEXT		5
 #define IWN_FW_TLV_PBREQ_MAXLEN		6
+#define IWN_FW_TLV_PAN                  7
 #define IWN_FW_TLV_ENH_SENS		14
 #define IWN_FW_TLV_PHY_CALIB		15
+#define IWN_FW_TLV_FLAGS                18
 
 	uint16_t	alt;
 	uint32_t	len;

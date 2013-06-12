@@ -19,6 +19,44 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#define IWN_MAX_BLINK_TBL       10
+#define IWN_LED_STATIC_ON       0
+#define IWN_LED_STATIC_OFF      1
+#define IWN_LED_SLOW_BLINK      2
+#define IWN_LED_INT_BLINK       3
+#define IWN_LED_UNIT            0x1388 /* 5 ms */
+
+static const struct {
+        uint16_t tpt;   /* Mb/s */
+        uint8_t on_time;
+        uint8_t off_time;
+} blink_tbl[] =
+{
+        {300, 5,  5},
+        {200, 8,  8},
+        {100, 11, 11},
+        {70,  13, 13},
+        {50,  15, 15},
+        {20,  17, 17},
+        {10,  19, 19},
+        {5,   22, 22},
+        {1,   26, 26},
+        {0,   33, 33},
+        /* SOLID_ON */
+};
+
+struct iwn_led_mode
+{
+        uint8_t         led_cur_mode;
+        uint64_t        led_cur_bt;
+        uint64_t        led_last_bt;
+        uint64_t        led_cur_tpt;
+        uint64_t        led_last_tpt;
+        uint64_t        led_bt_diff;
+        int             led_cur_time;
+        int             led_last_time;
+};
+
 struct iwn_rx_radiotap_header {
 	struct ieee80211_radiotap_header wr_ihdr;
 	uint64_t	wr_tsft;
@@ -192,8 +230,70 @@ struct iwn_vap {
 
 	int			(*iv_newstate)(struct ieee80211vap *,
 				    enum ieee80211_state, int);
+        int                     ctx;
+        int                     beacon_int;
+        uint8_t                 macaddr[IEEE80211_ADDR_LEN];
 };
 #define	IWN_VAP(_vap)	((struct iwn_vap *)(_vap))
+
+enum iwn_rxon_ctx_id {
+        IWN_RXON_BSS_CTX,
+        IWN_RXON_PAN_CTX,
+        IWN_NUM_RXON_CTX
+};
+
+#define IWN_UC_PAN_PRESENT              1
+
+/* ADD / MODIFY STATION Command (Op Code 18) -  byte 76-18 -bit13
+        STA_FLAG_PAN_STATION bit:
+        This bit is set (1) for a station in PAN mode */
+#define STA_FLAG_PAN_STATION            (1 << 13)
+
+#define BEACON_INTERVAL_DEFAULT         200
+#define IWN_SLOT_TIME_MIN               20
+
+struct iwn_pan_slot {
+        uint16_t time;
+        uint8_t type;
+        uint8_t reserved;
+} __packed;
+
+struct iwn_pan_params_cmd {
+        uint16_t flags;
+#define IWN_PAN_PARAMS_FLG_SLOTTED_MODE (1 << 3)
+
+        uint8_t reserved;
+        uint8_t num_slots;
+        struct iwn_pan_slot slots[10];
+} __packed;
+
+#define LINK_QUAL_AC_NUM 4
+
+struct iwn_link_qual_general_params {
+        uint8_t flags;
+
+        /* No entries at or above this (driver chosen) index contain MIMO */
+        uint8_t mimo_delimiter;
+
+        /* Best single antenna to use for single stream (legacy, SISO). */
+        uint8_t single_stream_ant_msk;  /* LINK_QUAL_ANT_* */
+
+        /* Best antennas to use for MIMO (unused for 4965, assumes both). */
+        uint8_t dual_stream_ant_msk;    /* LINK_QUAL_ANT_* */
+
+        /*
+         * If driver needs to use different initial rates for different
+         * EDCA QOS access categories (as implemented by tx fifos 0-3),
+         * this table will set that up, by indicating the indexes in the
+         * rs_table[LINK_QUAL_MAX_RETRY_NUM] rate table at which to start.
+         * Otherwise, driver should set all entries to 0.
+         *
+         * Entry usage:
+         * 0 = Background, 1 = Best Effort (normal), 2 = Video, 3 = Voice
+         * TX FIFOs above 3 use same value (typically 0) as TX FIFO 3.
+         */
+        uint8_t start_rate_index[LINK_QUAL_AC_NUM];
+} __packed;
 
 struct iwn_softc {
 	device_t		sc_dev;
@@ -283,9 +383,12 @@ struct iwn_softc {
 	int			last_rx_valid;
 	struct iwn_ucode_info	ucode_info;
 	struct iwn_rxon         rx_on[IWN_NUM_RXON_CTX];
-	struct iwn_rxon		rxon;
+	struct iwn_rxon		*rxon;
 	int                     ctx;
         struct ieee80211vap     *ivap[IWN_NUM_RXON_CTX];
+	uint8_t                 uc_pan_support;
+        uint8_t                 uc_scan_progress;
+
 	uint32_t		rawtemp;
 	int			temp;
 	int			noise;
@@ -305,6 +408,8 @@ struct iwn_softc {
 	int8_t			maxpwr5GHz;
 	int8_t			maxpwr[IEEE80211_CHAN_MAX];
 
+	uint32_t                tlv_feature_flags;
+
 	int32_t			temp_off;
 	uint32_t		int_mask;
 	uint8_t			ntxchains;
@@ -314,6 +419,7 @@ struct iwn_softc {
 	uint8_t			chainmask;
 
 	int			sc_tx_timer;
+	int                     sc_scan_timer;
 
 	struct ieee80211_tx_ampdu *qid2tap[IWN5000_NTXQUEUES];
 
@@ -328,16 +434,21 @@ struct iwn_softc {
 	void			(*sc_addba_stop)(struct ieee80211_node *,
 				    struct ieee80211_tx_ampdu *);
 
+	struct iwn_led_mode 	sc_led;
 
 	struct iwn_rx_radiotap_header sc_rxtap;
 	struct iwn_tx_radiotap_header sc_txtap;
+
+        /* The power save level originally configured by user */
+        int                     desired_pwrsave_level;
+
+        /* The current power save level, this may differ from the configured value due to
+         * thermal throttling etc.
+         * */
+        int                     current_pwrsave_level;
+
 };
 
-enum iwn_rxon_ctx_id {
-        IWL_RXON_BSS_CTX,
-        IWL_RXON_PAN_CTX,
-        IWL_NUM_RXON_CTX
-};
 
 #define IWN_LOCK_INIT(_sc) \
 	mtx_init(&(_sc)->sc_mtx, device_get_nameunit((_sc)->sc_dev), \
