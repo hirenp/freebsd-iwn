@@ -872,7 +872,7 @@ iwn_sysctlattach(struct iwn_softc *sc)
 	struct sysctl_oid *tree = device_get_sysctl_tree(sc->sc_dev);
 
 #ifdef IWN_DEBUG
-	sc->sc_debug = 0;
+	sc->sc_debug = 1;
 	SYSCTL_ADD_INT(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
 	    "debug", CTLFLAG_RW, &sc->sc_debug, 0, "control debugging printfs");
 #endif

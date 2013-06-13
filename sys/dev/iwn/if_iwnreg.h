@@ -65,6 +65,7 @@
 #define IWN_INT			0x008
 #define IWN_INT_MASK		0x00c
 #define IWN_FH_INT		0x010
+#define IWN_GPIO_IN             0x018
 #define IWN_RESET		0x020
 #define IWN_GP_CNTRL		0x024
 #define IWN_HW_REV		0x028
@@ -76,6 +77,9 @@
 #define IWN_UCODE_GP1           0x054
 #define IWN_UCODE_GP1_SET       0x058
 #define IWN_UCODE_GP1_CLR	0x05c
+#define IWN_UCODE_GP2           0x060
+#define IWN_UCODE_GP2_SET       0x064
+#define IWN_UCODE_GP2_CLR       0x068
 #define IWN_LED			0x094
 #define IWN_DRAM_INT_TBL	0x0a0
 #define IWN_SHADOW_REG_CTRL	0x0a8
@@ -189,6 +193,7 @@
 
 /* Possible flags for register IWN_RESET. */
 #define IWN_RESET_NEVO			(1 << 0)
+#define IWN_RESET_FORCE_NMI             (1 << 1)
 #define IWN_RESET_SW			(1 << 7)
 #define IWN_RESET_MASTER_DISABLED	(1 << 8)
 #define IWN_RESET_STOP_MASTER		(1 << 9)
@@ -200,6 +205,7 @@
 #define IWN_GP_CNTRL_INIT_DONE		(1 << 2)
 #define IWN_GP_CNTRL_MAC_ACCESS_REQ	(1 << 3)
 #define IWN_GP_CNTRL_SLEEP		(1 << 4)
+#define IWN_GP_CNTRL_POWER_SAVE_TYPE    (0x07000000)
 #define IWN_GP_CNTRL_RFKILL		(1 << 27)
 
 /* Possible flags for register IWN_HW_REV. */
@@ -221,6 +227,14 @@
 
 /* Possible flags for register IWN_GIO. */
 #define IWN_GIO_L0S_ENA		(1 << 1)
+
+/* Possible flags for register IWN_UCODE_GP1. */
+#define IWN_UCODE_GP1_MAC_SLEEP         (1 << 0)
+#define IWN_UCODE_GP1_RFKILL            (1 << 1)
+#define IWN_UCODE_GP1_CMD_BLOCKED       (1 << 2)
+#define IWN_UCODE_GP1_CTEMP_STOP_RF     (1 << 3)
+#define IWN_UCODE_GP1_CT_KILL_EXIT      (1 << 3)
+#define IWN_UCODE_GP1_UCODE_DISABLE     (1 << 4)
 
 /* Possible flags for register IWN_GP_DRIVER. */
 #define IWN_GP_DRIVER_RADIO_3X3_HYB	(0 << 0)
@@ -276,6 +290,12 @@
 #define IWN_FH_INT_TX_CHNL(x)	(1 << (x))
 #define IWN_FH_INT_RX_CHNL(x)	(1 << ((x) + 16))
 #define IWN_FH_INT_HI_PRIOR	(1 << 30)
+#define IWN_FH_INT_ERR          (1 << 31)
+#define IWN_FH_INT_RX_CHNL1     (1 << 17)
+#define IWN_FH_INT_RX_CHNL0     (1 << 16)
+#define IWN_FH_INT_TX_CHNL1     (1 << 1)
+#define IWN_FH_INT_TX_CHNL0     (1 << 0)
+
 /* Shortcuts for the above. */
 #define IWN_FH_INT_TX							\
 	(IWN_FH_INT_TX_CHNL(0) | IWN_FH_INT_TX_CHNL(1))
@@ -286,6 +306,7 @@
 #define IWN_FH_TX_CONFIG_DMA_PAUSE		0
 #define IWN_FH_TX_CONFIG_DMA_ENA		(1 << 31)
 #define IWN_FH_TX_CONFIG_CIRQ_HOST_ENDTFD	(1 << 20)
+#define IWN_FH_TX_CONFIG_DMA_CREDIT_ENA         (1 <<  3)
 
 /* Possible flags/values for register IWN_FH_TXBUF_STATUS. */
 #define IWN_FH_TXBUF_STATUS_TBNUM(x)	((x) << 20)
@@ -314,9 +335,16 @@
 /* Possible flags for register IWN_EEPROM. */
 #define IWN_EEPROM_READ_VALID	(1 << 0)
 #define IWN_EEPROM_CMD		(1 << 1)
+#define IWN_EEPROM_REG_MSK_ADDR	(0x0000FFFC)
+#define IWN_EEPROM_REG_MSK_DATA	(0xFFFF0000)
 
 /* Possible flags for register IWN_EEPROM_GP. */
-#define IWN_EEPROM_GP_IF_OWNER	0x00000180
+#define IWN_EEPROM_GP_VALID_MSK                         (0x00000007)
+#define IWN_EEPROM_GP_BAD_SIGNATURE_BOTH_EEP_AND_OTP    (0x00000000)
+#define IWN_EEPROM_GP_BAD_SIG_EEP_GOOD_SIG_OTP          (0x00000001)
+#define IWN_EEPROM_GP_GOOD_SIG_EEP_LESS_THAN_4K         (0x00000002)
+#define IWN_EEPROM_GP_GOOD_SIG_EEP_MORE_THAN_4K         (0x00000004)
+#define IWN_EEPROM_GP_IF_OWNER                          (0x00000180)
 
 /* Possible flags for register IWN_OTP_GP. */
 #define IWN_OTP_GP_DEV_SEL_OTP		(1 << 16)
