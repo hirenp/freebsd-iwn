@@ -290,7 +290,7 @@ static void	iwn5000_ampdu_tx_stop(struct iwn_softc *, int,
 		    uint8_t, uint16_t);
 static int	iwn5000_query_calibration(struct iwn_softc *);
 static int	iwn5000_send_calibration(struct iwn_softc *);
-static int	iwn5000_send_wimax_coex(struct iwn_softc *);
+//static int	iwn5000_send_wimax_coex(struct iwn_softc *);
 static int	iwn5000_crystal_calib(struct iwn_softc *);
 static int	iwn5000_temp_offset_calib(struct iwn_softc *);
 static int	iwn4965_post_alive(struct iwn_softc *);
@@ -6705,6 +6705,7 @@ iwn5000_send_calibration(struct iwn_softc *sc)
 	return 0;
 }
 
+#if 0
 static int
 iwn5000_send_wimax_coex(struct iwn_softc *sc)
 {
@@ -6731,6 +6732,7 @@ iwn5000_send_wimax_coex(struct iwn_softc *sc)
 	    __func__);
 	return iwn_cmd(sc, IWN5000_CMD_WIMAX_COEX, &wimax, sizeof wimax, 0);
 }
+#endif
 
 static int
 iwn5000_crystal_calib(struct iwn_softc *sc)
@@ -6887,6 +6889,7 @@ iwn5000_post_alive(struct iwn_softc *sc)
 
 	iwn_nic_unlock(sc);
 
+#if 0
 	/* Configure WiMAX coexistence for combo adapters. */
 	error = iwn5000_send_wimax_coex(sc);
 	if (error != 0) {
@@ -6895,6 +6898,7 @@ iwn5000_post_alive(struct iwn_softc *sc)
 		    __func__, error);
 		return error;
 	}
+#endif
 	if (sc->hw_type != IWN_HW_REV_TYPE_5150) {
 		/* Perform crystal calibration. */
 		error = iwn5000_crystal_calib(sc);
