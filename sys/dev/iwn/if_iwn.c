@@ -453,6 +453,9 @@ iwn_attach(device_t dev)
 	int i, error, result;
 	uint8_t macaddr[IEEE80211_ADDR_LEN];
 
+	sc->desired_pwrsave_level = IWN_POWERSAVE_LVL_DEFAULT;
+	sc->current_pwrsave_level = -1;  /* signifies uninitialized */
+
 	sc->sc_dev = dev;
 
 	/*

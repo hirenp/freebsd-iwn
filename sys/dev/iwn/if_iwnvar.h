@@ -295,6 +295,8 @@ struct iwn_link_qual_general_params {
         uint8_t start_rate_index[LINK_QUAL_AC_NUM];
 } __packed;
 
+#define LINK_QUAL_MAX_RETRY_NUM 16
+
 struct iwn_softc {
 	device_t		sc_dev;
 
@@ -475,6 +477,20 @@ struct iwn_softc {
 
 /* DTIM value to pass in for IWN_POWERSAVE_LVL_VOIP_COMPATIBLE */
 #define IWN_POWERSAVE_DTIM_VOIP_COMPATIBLE 2
+
+/*
+ * If IWL_DTIM_INDICATES_UNICAST_PENDING_AT_AP is defined, then power saving
+ * (including the power saving done for unicast traffic) becomes * proportional
+ * to the DTIM period received from the AP. Otherwise the constant DTIM
+ * period IWL_POWERSAVE_DTIM_VOIP_COMPATIBLE is used.
+ *
+ * Per the 802.11 spec DTIM value as applicable to power saving seems to
+ * be relevant only for indicating the frequency at which broadcast/multicast
+ * data is sent to the PS STAs.
+ * However in practice some APs may also send the unicast traffic along with
+ * the DTIM.
+ */
+#define IWN_DTIM_INDICATES_UNICAST_PENDING_AT_AP
 
 const uint8_t iwn_bss_ac_to_queue[] = {
         2, 3, 1, 0,

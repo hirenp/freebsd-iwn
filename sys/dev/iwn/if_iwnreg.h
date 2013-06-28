@@ -73,6 +73,7 @@
 #define IWN_EEPROM_GP		0x030
 #define IWN_OTP_GP		0x034
 #define IWN_GIO			0x03c
+#define IWN_GP_UCODE_REG        0x048
 #define IWN_GP_DRIVER		0x050
 #define IWN_UCODE_GP1           0x054
 #define IWN_UCODE_GP1_SET       0x058
@@ -220,6 +221,7 @@
 #define IWN_HW_REV_TYPE_6000	7
 #define IWN_HW_REV_TYPE_6050	8
 #define IWN_HW_REV_TYPE_6005	11
+#define IWL_HW_REV_TYPE_2000	16
 
 /* Possible flags for register IWN_GIO_CHICKEN. */
 #define IWN_GIO_CHICKEN_L1A_NO_L0S_RX	(1 << 23)
@@ -600,7 +602,7 @@ struct iwn_cmd_timing {
 	uint32_t	binitval;
 	uint16_t	lintval;
 	uint8_t         dtim_period;
-	uint16_t	reserved;
+	uint8_t	reserved;
 } __packed;
 
 /* Structure for command IWN_CMD_ADD_NODE. */
@@ -819,6 +821,11 @@ struct iwn_pmgt_cmd {
 #define IWN_PS_SLEEP_OVER_DTIM	(1 << 2)
 #define IWN_PS_PCI_PMGT		(1 << 3)
 #define IWN_PS_FAST_PD		(1 << 4)
+#define IWN_PS_BEACON_FILTERING (1 << 5)
+#define IWN_PS_SHADOW_REG       (1 << 6)
+#define IWN_PS_CT_KILL          (1 << 7)
+#define IWN_PS_BT_SCD           (1 << 8)
+#define IWN_PS_ADVANCED_PM      (1 << 9)
 
 	uint8_t		keepalive;
 	uint8_t		debug;
@@ -991,8 +998,8 @@ struct iwn_btcoex_prot {
 
 /* Structure for command IWN_CMD_SET_CRITICAL_TEMP. */
 struct iwn_critical_temp {
-	uint32_t	reserved;
 	uint32_t	tempM;
+	uint32_t	reserved;
 	uint32_t	tempR;
 /* degK <-> degC conversion macros. */
 #define IWN_CTOK(c)	((c) + 273)
@@ -1464,6 +1471,8 @@ struct iwn_fw_tlv {
 #define IWN_EEPROM_MAC		0x015
 #define IWN_EEPROM_SKU_CAP	0x045
 #define IWN_EEPROM_RFCFG	0x048
+#define IWN_EEPROM_MAC_PAN      0x049
+
 #define IWN4965_EEPROM_DOMAIN	0x060
 #define IWN4965_EEPROM_BAND1	0x063
 #define IWN5000_EEPROM_REG	0x066
